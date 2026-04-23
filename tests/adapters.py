@@ -8,6 +8,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizerBase
 from cs336_alignment.tokenize_prompt_and_output import tokenize_prompt_and_output
+from cs336_alignment.compute_entropy import compute_entropy
 
 
 def run_tokenize_prompt_and_output(
@@ -84,6 +85,7 @@ def run_compute_group_normalized_rewards(
 
 def run_compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     """Get the entropy of the logits (i.e., entropy of the final dimension)."""
+    return compute_entropy(logits)
     raise NotImplementedError
 
 
