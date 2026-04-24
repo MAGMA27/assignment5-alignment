@@ -13,6 +13,7 @@ from cs336_alignment.get_response_log_probs import get_response_log_probs
 from cs336_alignment.masked_normalize import masked_normalize
 from cs336_alignment.sft_microbatch_train_step import sft_microbatch_train_step
 from cs336_alignment.compute_group_normalized_rewards import compute_group_normalized_rewards
+from cs336_alignment.compute_naive_policy_gradient_loss import compute_naive_policy_gradient_loss
 
 
 def run_tokenize_prompt_and_output(
@@ -148,6 +149,7 @@ def run_compute_naive_policy_gradient_loss(
         torch.Tensor of shape (batch_size, sequence_length): 
             the policy gradient per-token loss.
     """
+    return compute_naive_policy_gradient_loss(raw_rewards_or_advantages, policy_log_probs)
     raise NotImplementedError
 
 
