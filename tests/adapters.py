@@ -16,6 +16,7 @@ from cs336_alignment.compute_group_normalized_rewards import compute_group_norma
 from cs336_alignment.compute_naive_policy_gradient_loss import compute_naive_policy_gradient_loss
 from cs336_alignment.compute_grpo_clip_loss import compute_grpo_clip_loss
 from cs336_alignment.compute_policy_gradient_loss import compute_policy_gradient_loss
+from cs336_alignment.masked_mean import masked_mean
 
 
 def run_tokenize_prompt_and_output(
@@ -221,6 +222,7 @@ def run_masked_mean(tensor: torch.Tensor, mask: torch.Tensor, dim: int | None = 
         torch.Tensor, the mean of the tensor along the specified
             dimension, considering only the elements with mask value 1.
     """
+    return masked_mean(tensor, mask, dim)
     raise NotImplementedError
 
 def run_sft_microbatch_train_step(
