@@ -14,7 +14,7 @@ sampling_params = SamplingParams(
 )
 
 # Create an LLM.
-llm = LLM(model=r'/home/fishros/Dev/CS336/assignment5-alignment/models/qwen2p5_math')
+llm = LLM(model=r'models/qwen2p5_math')
 
 # Generate texts from the prompts. The output is a list of RequestOutput objects
 # that contain the prompt, generated text, and other information.

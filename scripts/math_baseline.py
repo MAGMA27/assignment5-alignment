@@ -21,18 +21,18 @@ def evaluate_vllm(
         for prompt, truth, problem in tqdm(zip(prompts, ground_truth, problems), desc="处理结果"):
             # inferring
             output = vllm_model.generate(prompt, eval_sampling_params)
-            print(output)
-            # # parsing
-            # generated_text = output[0].outputs[0].text
-            # # recording
-            # reward = reward_fn(generated_text, truth)
-            # reward['problem'] = problem
-            # reward['output'] = generated_text
-            # reward['truth'] = truth
-            # # saving results
-            # json_str = json.dumps(reward, ensure_ascii=False) + '\n'
-            # r.write(json_str)
-            break
+            # print(output)
+            # parsing
+            generated_text = output[0].outputs[0].text
+            # recording
+            reward = reward_fn(generated_text, truth)
+            reward['problem'] = problem
+            reward['output'] = generated_text
+            reward['truth'] = truth
+            # saving results
+            json_str = json.dumps(reward, ensure_ascii=False) + '\n'
+            r.write(json_str)
+            # break
 
 
 if __name__ == '__main__':
