@@ -14,4 +14,4 @@ def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     '''
     log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
     
-    return -torch.sum(log_probs.exp() * log_probs, dim=-1)
+    return -torch.sum(torch.exp(log_probs) * log_probs, dim=-1)

@@ -27,7 +27,7 @@ def sft_microbatch_train_step(
     '''
     # forward pass
     batch_size = policy_log_probs.shape[0]
-    loss = -torch.sum(policy_log_probs.masked_fill(~response_mask, 0)) / batch_size / gradient_accumulation_steps / normalize_constant
+    loss = -torch.sum(policy_log_probs.masked_fill(~response_mask.bool(), 0)) / batch_size / gradient_accumulation_steps / normalize_constant
 
     # backward pass
     loss.backward()

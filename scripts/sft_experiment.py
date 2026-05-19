@@ -6,11 +6,44 @@ from unittest.mock import patch
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel
 from cs336_alignment.tokenize_prompt_and_output import tokenize_prompt_and_output
 from cs336_alignment.get_response_log_probs import get_response_log_probs
+from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
 from cs336_alignment.sft_microbatch_train_step import sft_microbatch_train_step
 import json
+import tqdm
+from typing import Callable
 import torch.nn.utils as utils
 import wandb
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
+def evaluate_vllm(
+    vllm_model: LLM,
+    reward_fn: Callable[[str, str], dict[str, float]],
+    prompts: list[str],
+    ground_truth: list[str],
+    eval_sampling_params: SamplingParams,
+) -> None:
+    """
+    Evaluate a language model on a list of prompts,
+    compute evaluation metrics, and serialize results to disk.
+    """
+    format_reward = 0  
+    answer_reward = 0  
+    reward = 0         
+    for prompt, truth in tqdm(zip(prompts, ground_truth), desc="evaluating"):
+        # inferring
+        output = vllm_model.generate(prompt, eval_sampling_params)
+        # print(output)
+        # parsing
+        generated_text = output[0].outputs[0].text
+        # recording
+        reward_dict = reward_fn(generated_text, truth)
+        format_reward += reward_dict['format_reward']
+        answer_reward += reward_dict['answer_reward']
+        reward += reward_dict['reward']
+    promp_len = len(prompts)
+    return format_reward/promp_len, answer_reward/promp_len, reward/promp_len
+        
 
 def init_vllm(model_id: str, device: str, seed: int, gpu_memory_utilization: float = 0.85):
     """
@@ -53,12 +86,13 @@ class TokenSequenceDataset(Dataset):
         self.data = data
 
     def __len__(self):
-        return next(iter(data.items())).shape[0]
+        first_key = next(iter(self.data))
+        return self.data[first_key].shape[0]
 
     def __getitem__(self, idx):
-        input_ids = data['input_ids'][idx, :]
-        labels = data['labels'][idx, :]
-        response_mask = data['response_mask'][idx, :]
+        input_ids = self.data['input_ids'][idx, :]
+        labels = self.data['labels'][idx, :]
+        response_mask = self.data['response_mask'][idx, :]
         return input_ids, labels, response_mask
 
 
@@ -66,7 +100,7 @@ if __name__ == '__main__':
     wandb.login()
 
     project ='sft_qwen_2p5_math'
-    device = 'cuda'
+    device = 'cuda:0'
     run_idx = 1
 
     config = {
@@ -76,11 +110,13 @@ if __name__ == '__main__':
         "gradient_accumulation_steps": 128, # microbatch size is 2, will fit on H100
     }
 
-    model_path = r'models/qwen2p5_math'
+    model_path = r'Qwen/Qwen2.5-Math-1.5B'
     output_dir = r'results/sft_qwen_2p5_math'
 
     # load model
-    model = AutoModelForCausalLM.from_pretrained(model_path).to(device)
+    model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.bfloat16).to(device)
+    model = torch.compile(model)
+    model.gradient_checkpointing_enable()
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 
     # init optimizer
@@ -113,23 +149,61 @@ if __name__ == '__main__':
     micro_batch_size = config['train_batch_size']//config['gradient_accumulation_steps']
     data_loader = DataLoader(dataset, batch_size=micro_batch_size, shuffle=True)
 
+    # eval llm init
+    llm = init_vllm(model_path, 'cuda:1', 2026)
+    # Create a sampling params object, stopping generation on newline.
+    sampling_params = SamplingParams(
+        temperature=1.0, top_p=1.0, max_tokens=1024, 
+        stop=["</answer>"], include_stop_str_in_output=True
+    )
+    # Sample prompts.
+    prop_path = r'cs336_alignment/prompts/r1_zero.prompt'
+    with open(prop_path, 'r', encoding='utf_8') as f:
+        prompt_template = f.read()
+
+    # load the MATH validation examples 
+    val_path = r'data/MATH/validation.jsonl'
+    val_prompt_lst = []
+    # val_problem_lst = []
+    val_ground_truth_lst = []
+    with open(val_path, 'r', encoding='utf_8') as f:
+        for line in f:
+            line = line.strip() 
+            if not line:
+                continue
+            # parsing
+            item = json.loads(line)
+            question = item['problem']
+            # operating
+            prompt = prompt_template.replace('{question}', question)
+            val_prompt_lst.append(prompt)
+            val_ground_truth_lst.append(item['answer'])
+            # val_problem_lst.append(item['problem'])
+    
+
     wandb.init(
             project=project,
             config=config
         )
     # Setup wandb metrics
     wandb.define_metric("train_step") # the x‑axis for training
-    # wandb.define_metric("eval_step") # the x‑axis for evaluation
-    # everything that starts with train/ is tied to train_step
+    wandb.define_metric("eval_step") # the x‑axis for evaluation
+    # # everything that starts with train/ is tied to train_step
     wandb.define_metric("train/*", step_metric="train_step")
-    # everything that starts with eval/ is tied to eval_step
-    # wandb.define_metric("eval/*", step_metric="eval_step")
+    # # everything that starts with eval/ is tied to eval_step
+    wandb.define_metric("eval/*", step_metric="eval_step")
     train_step = 0
+    eval_step = 0
     model.train()
     for it, (input_ids, labels, response_mask) in enumerate(data_loader):
+        input_ids = input_ids.to(device)
+        labels = labels.to(device)
+        response_mask = response_mask.to(device)
         # Forward pass.
-        log_probs = get_response_log_probs(model, input_ids, labels, return_token_entropy=True)
+        log_probs = get_response_log_probs(model, input_ids, labels, return_token_entropy=False)
         loss, metadata = sft_microbatch_train_step(log_probs['log_probs'], response_mask, config['gradient_accumulation_steps'])
+        wandb.log({"it":it, "training_loss":loss})
+        print(f'"it":{it}, "training_loss":{loss}')
 
         if (it + 1) % config['gradient_accumulation_steps'] == 0:
             # gradient clipping
@@ -144,8 +218,17 @@ if __name__ == '__main__':
                 output_dir_ckpt = f'{output_dir}\\{project}_run{run_idx}_step{train_step}.pt'
                 model.save_pretrained(save_directory=output_dir_ckpt)
                 tokenizer.save_pretrained(save_directory=output_dir_ckpt)
+                
+            wandb.log({"train_step":train_step, "training_loss":loss})
+            print(f'train_step:{train_step}, "training_loss":{loss}')
 
-            wandb.log({"train_step":train_step, "training_loss":loss, "token_entropy":log_probs['token_entropy']})
+            # eval model
+            if (train_step + 1) % 50 == 0:
+                load_policy_into_vllm_instance(model, llm)
+                format_reward, answer_reward, reward = evaluate_vllm(llm, r1_zero_reward_fn, val_prompt_lst, val_ground_truth_lst, sampling_params)
+                eval_step += 1
+                wandb.log({"eval_step":eval_step, "format_reward":format_reward, 
+                           "answer_reward":answer_reward, "reward":reward})
 
             if train_step+1 >= config['n_sft_steps']:
                 break
