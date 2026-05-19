@@ -9,6 +9,7 @@ from cs336_alignment.tokenize_prompt_and_output import tokenize_prompt_and_outpu
 from cs336_alignment.get_response_log_probs import get_response_log_probs
 from cs336_alignment.sft_microbatch_train_step import sft_microbatch_train_step
 import json
+import torch.nn.utils as utils
 import wandb
 
 
@@ -132,6 +133,8 @@ if __name__ == '__main__':
         loss, metadata = sft_microbatch_train_step(log_probs['log_probs'], response_mask, config['gradient_accumulation_steps'])
 
         if (it + 1) % config['gradient_accumulation_steps'] == 0:
+            # gradient clipping
+            utils.clip_grad_value_(model.parameters(), clip_value=1.0)
             # Update weights every `gradient_accumulation_steps` batches.
             optimizer.step()
             # Zero gradients every `gradient_accumulation_steps` batches.
