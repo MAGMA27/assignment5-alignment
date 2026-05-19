@@ -2,9 +2,8 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from vllm.model_executor import set_random_seed as vllm_set_random_seed
 from vllm import LLM, SamplingParams
-from transformers import AutoModel, AutoTokenizer, PreTrainedModel
 from unittest.mock import patch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel
 from cs336_alignment.tokenize_prompt_and_output import tokenize_prompt_and_output
 from cs336_alignment.get_response_log_probs import get_response_log_probs
 from cs336_alignment.sft_microbatch_train_step import sft_microbatch_train_step
@@ -66,7 +65,7 @@ class TokenSequenceDataset(Dataset):
 if __name__ == '__main__':
     wandb.login()
 
-    project ='grpo_qwen_2p5_math'
+    project ='sft_qwen_2p5_math'
     device = 'cuda'
     run_idx = 1
 
@@ -78,7 +77,7 @@ if __name__ == '__main__':
     }
 
     model_path = r'models/qwen2p5_math'
-    output_dir = r'results/grpo_qwen_2p5_math'
+    output_dir = r'results/sft_qwen_2p5_math'
 
     # load model
     model = AutoModelForCausalLM.from_pretrained(model_path).to(device)
