@@ -116,7 +116,7 @@ for it in tqdm(range(config["n_grpo_steps"]), desc="training"):
     #     response_lst.append(tokenizer.decode(generated, skip_special_tokens=False))
     
     for i in tqdm(range(n_prompts_per_rollout_batch), desc=f"generating rollouts for it {it}"):
-        prompt = repeated_prompt_lst[i*n_prompts_per_rollout_batch:i*n_prompts_per_rollout_batch+config["group_size"]]
+        prompt = repeated_prompt_lst[i*config["group_size"]:(i+1)*config["group_size"]]
         inputs = tokenizer(prompt, return_tensors='pt').to(device_rollout)
         input_length = inputs['input_ids'].shape[1]
         outputs = model_rollout.generate(

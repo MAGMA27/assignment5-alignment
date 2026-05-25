@@ -69,16 +69,23 @@ def init_vllm(model_id: str, device: str, seed: int, gpu_memory_utilization: flo
         return LLM(
             model=model_id,
             device=device,
-            dtype='half',
+            dtype=torch.bfloat16,
             enable_prefix_caching=True,
             gpu_memory_utilization=gpu_memory_utilization,
-            enforce_eager=True,
         )
 
-def load_state_dict_into_vllm(state_dict, llm: LLM):
-    llm_model = llm.llm_engine.model_executor.driver_worker.model_runner.model
-    llm_model.load_weights(state_dict.items())
+def load_state_dict_into_vllm(state_dict_cpu, llm):
+    # 去掉 '_orig_mod.' 前缀
+    cleaned_state_dict = {}
+    for key, value in state_dict_cpu.items():
+        if key.startswith('_orig_mod.'):
+            new_key = key[len('_orig_mod.'):]
+        else:
+            new_key = key
+        cleaned_state_dict[new_key] = value
     
+    llm_model = llm.llm_engine.model_executor.driver_worker.model_runner.model
+    llm_model.load_weights(cleaned_state_dict.items())
 # ---------- evaluation_process ----------
 def evaluation_process(
     model_path: str,
@@ -153,113 +160,118 @@ def main():
     dataloader = DataLoader(dataset, batch_size=micro_batch_size, shuffle=True)
 
     # ---------- validation data preparation ----------
-    # prop_path = r'cs336_alignment/prompts/r1_zero.prompt'
-    # with open(prop_path, 'r', encoding='utf-8') as f:
-    #     prompt_template = f.read()
-    # val_path = r'data/MATH/validation.jsonl'
-    # val_prompts, val_ground_truths= [], []
-    # with open(val_path, 'r', encoding='utf-8') as f:
-    #     for line in f:
-    #         line = line.strip()
-    #         if not line:
-    #             continue
-    #         item = json.loads(line)
-    #         question = item['problem']
-    #         prompt = prompt_template.replace('{question}', question)
-    #         val_prompts.append(prompt)
-    #         val_ground_truths.append(item['answer'])
+    prop_path = r'cs336_alignment/prompts/r1_zero.prompt'
+    with open(prop_path, 'r', encoding='utf-8') as f:
+        prompt_template = f.read()
+    val_path = r'data/MATH/validation.jsonl'
+    val_prompts, val_ground_truths= [], []
+    with open(val_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            item = json.loads(line)
+            question = item['problem']
+            prompt = prompt_template.replace('{question}', question)
+            val_prompts.append(prompt)
+            val_ground_truths.append(item['answer'])
 
-    # sampling_params = SamplingParams(
-    #     temperature=1.0, top_p=1.0, max_tokens=1024,
-    #     stop=["</answer>"], include_stop_str_in_output=True
-    # )
+    sampling_params = SamplingParams(
+        temperature=1.0, top_p=1.0, max_tokens=1024,
+        stop=["</answer>"], include_stop_str_in_output=True
+    )
 
-    # # creating queue
-    # ckpt_queue = mp.Queue()
-    # result_queue = mp.Queue()
+    # creating queue
+    ckpt_queue = mp.Queue()
+    result_queue = mp.Queue()
 
-    # # start evaluation process
-    # eval_proc = mp.Process(
-    #     target=evaluation_process,
-    #     args=(model_path, val_prompts, val_ground_truths, sampling_params,
-    #           ckpt_queue, result_queue, device_eval, 2026)
-    # )
-    # eval_proc.start()
+    # start evaluation process
+    eval_proc = mp.Process(
+        target=evaluation_process,
+        args=(model_path, val_prompts, val_ground_truths, sampling_params,
+              ckpt_queue, result_queue, device_eval, 2026)
+    )
+    eval_proc.start()
 
     # ---------- wandb init ----------
     wandb.login()
     wandb.init(project='sft_qwen_2p5_math', config=config)
     wandb.define_metric("train_step")
-    # wandb.define_metric("eval_step")
+    wandb.define_metric("eval_step")
     wandb.define_metric("train/*", step_metric="train_step")
-    # wandb.define_metric("eval/*", step_metric="eval_step")
+    wandb.define_metric("eval/*", step_metric="eval_step")
 
     train_step = 0
     eval_step = 0
     step_loss = 0
+    it = 0
 
     # ---------- training loop ----------
-    for it, (input_ids, labels, response_mask) in enumerate(dataloader):
-        input_ids = input_ids.to(device_train)
-        labels = labels.to(device_train)
-        response_mask = response_mask.to(device_train)
-
-        # forward pass
-        log_probs = get_response_log_probs(model, input_ids, labels, return_token_entropy=False)
-        loss, metadata = sft_microbatch_train_step(log_probs['log_probs'], response_mask, config['gradient_accumulation_steps'])
-        wandb.log({"it": it, "training_loss": loss})
-        print(f'timestamp:{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}, it:{it}, training_loss:{loss}')
-        step_loss += loss
-
-        # gradient accumulation
-        if (it + 1) % config['gradient_accumulation_steps'] == 0:
-            # gradient clipping with value 1
-            utils.clip_grad_value_(model.parameters(), clip_value=1.0)
-            optimizer.step()
-            optimizer.zero_grad()
-
-            wandb.log({
-                "train_step": train_step,
-                "step_loss": step_loss
-            })
-            print(f'timestamp:{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}, train_step:{train_step}, step_loss:{step_loss}')
-
-            if (train_step + 1) % 50 == 0:
-                # # 将模型 state_dict 移到 CPU（减少 GPU 内存占用并便于序列化）
-                # state_dict_cpu = {k: v.cpu() for k, v in model.state_dict().items()}
-                # # 将检查点放入队列（传递 state_dict）
-                # ckpt_queue.put((train_step, state_dict_cpu))
-                # print(f"[Main] Sent checkpoint step {train_step} to eval process.")
-
-                # # 非阻塞检查是否有评估结果返回
-                # try:
-                #     step, fmt_r, ans_r, rew = result_queue.get_nowait()
-                #     eval_step += 1
-                #     wandb.log({
-                #         "eval_step": eval_step,
-                #         "format_reward": fmt_r,
-                #         "answer_reward": ans_r,
-                #         "reward": rew
-                #     })
-                #     print(f"[Main] Received eval result for step {step}: reward={rew:.4f}")
-                # except Empty:
-                #     pass
-
-                # checkpointing
-                ckpt_path = os.path.join(output_dir, f"sft_ckpt_step{train_step}")
-                os.makedirs(ckpt_path, exist_ok=True)
-                model.save_pretrained(save_directory=ckpt_path)
-                tokenizer.save_pretrained(save_directory=ckpt_path)
-                print(f"saving checkpoint to {ckpt_path}")
-
-            train_step += 1
-            step_loss = 0
+    for ep in range(100):
+        for input_ids, labels, response_mask in dataloader:
+            input_ids = input_ids.to(device_train)
+            labels = labels.to(device_train)
+            response_mask = response_mask.to(device_train)
+    
+            # forward pass
+            log_probs = get_response_log_probs(model, input_ids, labels, return_token_entropy=False)
+            loss, metadata = sft_microbatch_train_step(log_probs['log_probs'], response_mask, config['gradient_accumulation_steps'])
+            wandb.log({"it": it, "training_loss": loss})
+            print(f'timestamp:{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}, it:{it}, training_loss:{loss}')
+            step_loss += loss
+    
+            # gradient accumulation
+            if (it + 1) % config['gradient_accumulation_steps'] == 0:
+                # gradient clipping with value 1
+                utils.clip_grad_value_(model.parameters(), clip_value=1.0)
+                optimizer.step()
+                optimizer.zero_grad()
+    
+                wandb.log({
+                    "train_step": train_step,
+                    "step_loss": step_loss
+                })
+                print(f'timestamp:{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}, train_step:{train_step}, step_loss:{step_loss}')
+    
+                if (train_step + 1) % 50 == 0:
+                    # 将模型 state_dict 移到 CPU（减少 GPU 内存占用并便于序列化）
+                    state_dict_cpu = {k: v.cpu() for k, v in model.state_dict().items()}
+                    # 将检查点放入队列（传递 state_dict）
+                    ckpt_queue.put((train_step, state_dict_cpu))
+                    print(f"[Main] Sent checkpoint step {train_step} to eval process.")
+    
+                    # 非阻塞检查是否有评估结果返回
+                    try:
+                        step, fmt_r, ans_r, rew = result_queue.get_nowait()
+                        eval_step += 1
+                        wandb.log({
+                            "eval_step": eval_step,
+                            "format_reward": fmt_r,
+                            "answer_reward": ans_r,
+                            "reward": rew
+                        })
+                        print(f"[Main] Received eval result for step {step}: reward={rew:.4f}")
+                    except Empty:
+                        pass
+    
+                    # checkpointing
+                    ckpt_path = os.path.join(output_dir, f"sft_ckpt_step{train_step}")
+                    os.makedirs(ckpt_path, exist_ok=True)
+                    model.save_pretrained(save_directory=ckpt_path)
+                    tokenizer.save_pretrained(save_directory=ckpt_path)
+                    print(f"saving checkpoint to {ckpt_path}")
+    
+                train_step += 1
+                step_loss = 0
+            it += 1
             if train_step >= config['n_sft_steps']:
                 break
+        if train_step >= config['n_sft_steps']:
+            break
 
     # 训练结束，发送停止信号并等待评估进程结束
-    # ckpt_queue.put("STOP")
-    # eval_proc.join()
+    ckpt_queue.put("STOP")
+    eval_proc.join()
 
     final_path = os.path.join(output_dir, "latest")
     os.makedirs(final_path, exist_ok=True)
