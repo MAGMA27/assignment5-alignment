@@ -1,3 +1,6 @@
+# 个人实现的CS336 assignment5
+额外梳理了一份[SFT、GRPO架构和细节梳理](./SFT、GRPO架构和细节梳理.md)笔记，个人学习笔记，请谨慎参考，如有错误欢迎指出。
+
 # CS336 Spring 2025 Assignment 5: Alignment
 
 For a full description of the assignment, see the assignment handout at

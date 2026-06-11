@@ -43,7 +43,7 @@ if __name__ == '__main__':
     )
 
     # Create an LLM.
-    llm = LLM(model=r'models/qwen2p5_math')
+    llm = LLM(model=r'results/grpo/latest')
 
     # Sample prompts.
     prop_path = r'cs336_alignment/prompts/r1_zero.prompt'
@@ -52,7 +52,7 @@ if __name__ == '__main__':
 
     # load the MATH validation examples 
     val_path = r'data/MATH/validation.jsonl'
-    res_path = r'results/result_baseline.jsonl'
+    res_path = r'results/result_grpo.jsonl'
 
     prompt_lst = []
     problem_lst = []
