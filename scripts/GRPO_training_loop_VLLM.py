@@ -1,5 +1,6 @@
 import torch
 import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import wandb
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch.nn.utils as utils
@@ -46,6 +47,7 @@ def main(project, config, device_train, device_rollout, sampling_params):
     # load model
     model_train = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.bfloat16).to(device_train)
     model_train.train()
+    model_train.gradient_checkpointing_enable()
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 
     # init vllm
@@ -187,7 +189,7 @@ if __name__ == "__main__":
         "epochs_per_rollout_batch": 1, # On-policy
         "train_batch_size": 256, # On-policy
         "gradient_accumulation_steps": 128, # microbatch size is 2, will fit on H100
-        "gpu_memory_utilization": 0.85,
+        "gpu_memory_utilization": 0.8,
         "loss_type": "reinforce_with_baseline",
         "use_std_normalization": True,
     }

@@ -19,4 +19,6 @@ def compute_naive_policy_gradient_loss(
         torch.Tensor Shape (batch_size, sequence_length), the per-token policy-gradient loss (to
             be aggregated across the batch and sequence dimensions in the training loop).
     '''
+    if raw_rewards_or_advantages.dim() == 1:
+        raw_rewards_or_advantages = raw_rewards_or_advantages.unsqueeze(-1)
     return - raw_rewards_or_advantages * policy_log_probs

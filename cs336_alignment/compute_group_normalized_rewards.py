@@ -36,12 +36,25 @@ def compute_group_normalized_rewards(
     '''
     raw_rewards_dict = [reward_fn(response, truth) for response, truth in zip(rollout_responses, repeated_ground_truths)]
     raw_rewards = torch.tensor([re_dict['reward'] for re_dict in raw_rewards_dict])
-    raw_rewards = raw_rewards.reshape(-1, group_size) # [n_prompts_per_rollout_batch, group_size]
+    raw_rewards = raw_rewards.reshape(-1, group_size)
 
-    advantages = raw_rewards - torch.mean(raw_rewards, -1, keepdim=True)
+    mean_rewards = torch.mean(raw_rewards, dim=-1, keepdim=True)
+    advantages = raw_rewards - mean_rewards
+
+    std_rewards = torch.std(raw_rewards, dim=-1, keepdim=True)
+    
     if normalize_by_std:
-        advantages = advantages / torch.std(raw_rewards, -1, keepdim=True)
+        advantages = advantages / (std_rewards + advantage_eps)
 
-    advantages = (advantages + advantage_eps).reshape(-1, )
+    advantages = advantages.reshape(-1)
+    raw_rewards = raw_rewards.reshape(-1)
 
-    return advantages, raw_rewards.reshape(-1, ), {"normalize_by_std": normalize_by_std}
+    metadata = {
+        "normalize_by_std": normalize_by_std,
+        "reward_mean": mean_rewards.mean().item(), 
+        "reward_std": std_rewards.mean().item(), 
+        "reward_max": raw_rewards.max().item(),
+        "reward_min": raw_rewards.min().item(),
+    }
+
+    return advantages, raw_rewards, metadata

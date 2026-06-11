@@ -19,5 +19,6 @@ def masked_mean(
     Returns:
         torch.Tensor The masked mean; shape matches tensor.mean(dim) semantics.
     '''
+    mask = mask.bool() 
     masked_tensor = tensor.masked_fill(~mask, 0)
     return torch.sum(masked_tensor, dim=dim) / torch.sum(mask, dim=dim)
